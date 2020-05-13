@@ -32,6 +32,10 @@
 #  define PLATFORM_IS_SPARC
 #endif
 
+#if defined(__mips__)
+#  define PLATFORM_IS_MIPS
+#endif
+
 namespace snmalloc
 {
   /**
@@ -169,6 +173,8 @@ namespace snmalloc
 #  include "aal_powerpc.h"
 #elif defined(PLATFORM_IS_SPARC)
 #  include "aal_sparc.h"
+#elif defined(PLATFORM_IS_MIPS)
+#  include "aal_mips.h"
 #endif
 
 namespace snmalloc

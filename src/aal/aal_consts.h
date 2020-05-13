@@ -29,6 +29,7 @@ namespace snmalloc
   enum AalName : int
   {
     ARM,
+    MIPS,
     PowerPC,
     X86,
     X86_SGX,
