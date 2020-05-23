@@ -36,6 +36,10 @@
 #  define PLATFORM_IS_MIPS
 #endif
 
+#if defined(__riscv)
+#  define PLATFORM_IS_RISCV
+#endif
+
 namespace snmalloc
 {
   /**
@@ -175,6 +179,8 @@ namespace snmalloc
 #  include "aal_sparc.h"
 #elif defined(PLATFORM_IS_MIPS)
 #  include "aal_mips.h"
+#elif defined(PLATFORM_IS_RISCV)
+#  include "aal_riscv.h"
 #endif
 
 namespace snmalloc
