@@ -25,6 +25,12 @@ namespace snmalloc
 
     static SNMALLOC_CONSTINIT_STATIC size_t minimum_alloc_size = 4096;
 
+#if defined(SNMALLOC_VA_BITS_32)
+    static constexpr size_t capptr_root_alloc_size = 128ULL * 1024 * 1024;
+#elif defined(SNMALLOC_VA_BITS_64)
+    static constexpr size_t capptr_root_alloc_size = 1ULL * 1024 * 1024 * 1024;
+#endif
+
     /**
      * Reserve memory at a specific alignment.
      */
