@@ -3,6 +3,10 @@
 #if defined(__FreeBSD__) && !defined(_KERNEL)
 #  include "pal_bsd_aligned.h"
 
+#  if defined(__CHERI_PURE_CAPABILITY__)
+#    include <cheri/cheric.h>
+#  endif
+
 namespace snmalloc
 {
   /**
@@ -24,6 +28,26 @@ namespace snmalloc
      * add new features that they should add any required feature flags.
      */
     static constexpr uint64_t pal_features = PALBSD_Aligned::pal_features;
+
+#  if defined(__CHERI_PURE_CAPABILITY__)
+    static_assert(
+      aal_supports<StrictProvenance>,
+      "CHERI purecap support requires StrictProvenance AAL");
+
+    /**
+     * On CheriBSD, exporting a pointer means stripping it of the authority to
+     * manage the address space it references by clearing the CHERIABI_VMMAP
+     * permission bit.
+     */
+    template<typename T, capptr_bounds B>
+    static SNMALLOC_FAST_PATH CapPtr<T, capptr_export_type<B>()>
+    capptr_export(CapPtr<T, B> p)
+    {
+      return CapPtr<T, capptr_export_type<B>()>(__builtin_cheri_perms_and(
+        p.unsafe_capptr,
+        ~static_cast<unsigned int>(CHERI_PERM_CHERIABI_VMMAP)));
+    }
+#  endif
   };
 } // namespace snmalloc
 #endif
