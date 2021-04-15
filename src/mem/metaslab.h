@@ -121,10 +121,13 @@ namespace snmalloc
       return bits::min(threshold, max);
     }
 
-    template<capptr_bounds B>
+    template<SNMALLOC_CONCEPT(capptr_bounds::c) B>
     SNMALLOC_FAST_PATH void set_full(CapPtr<Slab, B> slab)
     {
-      static_assert(B == CBChunkD || B == CBChunk);
+      static_assert(
+        B::spatial == capptr_bounds::spatial::ChunkD ||
+        B::spatial == capptr_bounds::spatial::Chunk);
+
       SNMALLOC_ASSERT(free_queue.empty());
 
       // Prepare for the next free queue to be built.
@@ -136,17 +139,17 @@ namespace snmalloc
       null_prev();
     }
 
-    template<typename T, capptr_bounds B>
-    static SNMALLOC_FAST_PATH CapPtr<Slab, capptr_bound_chunkd_bounds<B>()>
+    template<typename T, SNMALLOC_CONCEPT(capptr_bounds::c) B>
+    static SNMALLOC_FAST_PATH CapPtr<Slab, capptr_bound_chunkd_bounds<B>>
     get_slab(CapPtr<T, B> p)
     {
-      static_assert(B == CBArena || B == CBChunkD || B == CBChunk);
+      static_assert(B::spatial >= capptr_bounds::spatial::Chunk);
 
       return capptr_bound_chunkd(
         pointer_align_down<SLAB_SIZE, Slab>(p.as_void()), SLAB_SIZE);
     }
 
-    template<capptr_bounds B>
+    template<SNMALLOC_CONCEPT(capptr_bounds::c) B>
     static bool is_short(CapPtr<Slab, B> p)
     {
       return pointer_align_down<SUPERSLAB_SIZE, Slab>(p.as_void()) == p;
@@ -204,10 +207,12 @@ namespace snmalloc
       return capptr_export(p.as_void());
     }
 
-    template<capptr_bounds B>
+    template<SNMALLOC_CONCEPT(capptr_bounds::c) B>
     void debug_slab_invariant(CapPtr<Slab, B> slab, LocalEntropy& entropy)
     {
-      static_assert(B == CBChunkD || B == CBChunk);
+      static_assert(
+        B::spatial == capptr_bounds::spatial::ChunkD ||
+        B::spatial == capptr_bounds::spatial::Chunk);
 
 #if !defined(NDEBUG) && !defined(SNMALLOC_CHEAP_CHECKS)
       bool is_short = Metaslab::is_short(slab);

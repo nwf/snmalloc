@@ -20,77 +20,144 @@ namespace snmalloc
    * Summaries of StrictProvenance metadata.  We abstract away the particular
    * size and any offset into the bounds.
    *
-   * CBArena is as powerful as our pointers get: they're results from mmap(),
-   * and so confer as much authority as the kernel has given us.
-   *
-   * CBChunk is restricted to either a single chunk (SUPERSLAB_SIZE) or perhaps
-   * to several if we've requesed a large allocation (see capptr_chunk_is_alloc
-   * and its uses).
-   *
-   * CBChunkD is curious: we often use CBArena-bounded pointers to derive
-   * pointers to Allocslab metadata, and on most fast paths these pointers end
-   * up being ephemeral.  As such, on NDEBUG builds, we elide the capptr_bounds
-   * that would bound these to chunks and instead just unsafely inherit the
-   * CBArena bounds.  The use of CBChunkD thus helps to ensure that we
-   * eventually do invoke capptr_bounds when these pointers end up being longer
-   * lived!
-   *
-   * *E forms are "exported" and have had platform constraints applied.  That
-   * means, for example, on CheriBSD, that they have had their VMMAP permission
-   * stripped.
-   *
-   * Yes, I wish the start-of-comment characters were aligned below as well.
-   * I blame clang format.
    */
-  enum capptr_bounds
+
+  namespace capptr_bounds
   {
-    /*                Spatial  Notes                                      */
-    CBArena, /*        Arena                                              */
-    CBChunkD, /*       Arena   Chunk-bounded in debug; internal use only! */
-    CBChunk, /*        Chunk                                              */
-    CBChunkE, /*       Chunk   (+ platform constraints)                   */
-    CBAlloc, /*        Alloc                                              */
-    CBAllocE /*        Alloc   (+ platform constraints)                   */
+    /*
+     * Bounds dimensions are sorted so that < reflects authority.  For example,
+     * spatial::Alloc is less capable than spatial::Arena.
+     */
+    enum class spatial
+    {
+      /**
+       * Bounded to a particular allocation (which might be Large!)
+       */
+      Alloc,
+      /**
+       * Bounded to a particular CHUNK_SIZE granule (e.g., Superslab) or perhaps
+       * several in the case of a Large allocation.
+       */
+      Chunk,
+      /**
+       * As with Chunk, on debug builds, or Arena on release builds.  Many uses
+       * of ChunkD CapPtr<>s do not escape the allocator and so bounding serves
+       * only to guard us against ourselves.  As such, on NDEBUG builds, we
+       * elide the capptr_bounds that would bound these to chunks and instead
+       * just unsafely inherit the Arena bounds.  The use of ChunkD thus helps
+       * to ensure that we eventually do invoke capptr_bounds when these
+       * pointers end up being longer lived.  See src/mem/ptrhelpers.h
+       */
+      ChunkD,
+      /**
+       * As spatially-unbounded as our pointers come.  These are the spatial
+       * bounds inherited from the kernel for our memory mappings.
+       */
+      Arena
+    };
+    enum class platform
+    {
+      /**
+       * Platform constraints have been applied.  For example, on CheriBSD, the
+       * VMMAP permission has been stripped and so this CapPtr<> cannot
+       * authorize manipulation of the address space itself.
+       */
+      Exported,
+      Internal
+    };
+
+    template<spatial S, platform P>
+    struct t
+    {
+      static constexpr enum spatial spatial = S;
+      static constexpr enum platform platform = P;
+
+      template<enum spatial SO>
+      using with_spatial = t<SO, P>;
+
+      template<enum platform PO>
+      using with_platform = t<S, PO>;
+
+      /*
+       * The dimensions here are not used completely orthogonally.  In
+       * particular, high-authority spatial bounds imply high-authority in other
+       * dimensions and unchecked pointers must be annotated as tightly bounded.
+       */
+      static_assert(!(S == spatial::Arena) || (P == platform::Internal));
+    };
+
+    using CBArena = t<spatial::Arena, platform::Internal>;
+    using CBChunk = t<spatial::Chunk, platform::Internal>;
+    using CBChunkD = t<spatial::ChunkD, platform::Internal>;
+    using CBChunkE = t<spatial::Chunk, platform::Exported>;
+    using CBAlloc = t<spatial::Alloc, platform::Internal>;
+    using CBAllocE = t<spatial::Alloc, platform::Exported>;
+
+    // clang-format off
+#ifdef __cpp_concepts
+    /*
+     * This is spelled a little differently from our other concepts because GCC
+     * treats "{ T::spatial }" as generating a reference and then complains that
+     * it isn't "ConceptSame<const spatial>", though clang is perfectly happy
+     * with that spelling.  Both seem happy with this formulation.
+     */
+    template<typename T>
+    concept c =
+      ConceptSame<decltype(T::spatial), const spatial> &&
+      ConceptSame<decltype(T::platform), const platform>;
+#endif
+    // clang-format on
   };
+
+  /*
+   * Defining these above and then `using` them to hide the namespace label like
+   * this is still shorter than defining these completely out here, since there
+   * isn't a notion of local namespace imports.
+   */
+  using CBArena = capptr_bounds::CBArena;
+  using CBChunk = capptr_bounds::CBChunk;
+  using CBChunkD = capptr_bounds::CBChunkD;
+  using CBChunkE = capptr_bounds::CBChunkE;
+  using CBAlloc = capptr_bounds::CBAlloc;
+  using CBAllocE = capptr_bounds::CBAllocE;
 
   /**
    * Compute the "exported" variant of a capptr_bounds annotation.  This is
    * used by the PAL's capptr_export function to compute its return value's
    * annotation.
    */
-  template<capptr_bounds B>
-  SNMALLOC_CONSTEVAL capptr_bounds capptr_export_type()
-  {
-    static_assert(
-      (B == CBChunk) || (B == CBAlloc), "capptr_export_type of bad type");
+  template<SNMALLOC_CONCEPT(capptr_bounds::c) B>
+  using capptr_export_type =
+    typename B::template with_platform<capptr_bounds::platform::Exported>;
 
-    switch (B)
-    {
-      case CBChunk:
-        return CBChunkE;
-      case CBAlloc:
-        return CBAllocE;
-    }
-  }
-
-  template<capptr_bounds BI, capptr_bounds BO>
-  SNMALLOC_CONSTEVAL bool capptr_is_bounds_refinement()
+  /**
+   * Determine whether BI is a spatial refinement of BO.
+   * Chunk and ChunkD are considered eqivalent here.
+   */
+  template<
+    SNMALLOC_CONCEPT(capptr_bounds::c) BI,
+    SNMALLOC_CONCEPT(capptr_bounds::c) BO>
+  SNMALLOC_CONSTEVAL bool capptr_is_spatial_refinement()
   {
-    switch (BI)
+    if (BI::platform != BO::platform)
+      return false;
+
+    switch (BI::spatial)
     {
-      case CBAllocE:
-        return BO == CBAllocE;
-      case CBAlloc:
-        return BO == CBAlloc;
-      case CBChunkE:
-        return BO == CBAllocE || BO == CBChunkE;
-      case CBChunk:
-        return BO == CBAlloc || BO == CBChunk || BO == CBChunkD;
-      case CBChunkD:
-        return BO == CBAlloc || BO == CBChunk || BO == CBChunkD;
-      case CBArena:
-        return BO == CBAlloc || BO == CBChunk || BO == CBChunkD ||
-          BO == CBArena;
+      using namespace capptr_bounds;
+      case spatial::Arena:
+        return true;
+
+      case spatial::ChunkD:
+        return BO::spatial == spatial::Alloc || BO::spatial == spatial::Chunk ||
+          BO::spatial == spatial::ChunkD;
+
+      case spatial::Chunk:
+        return BO::spatial == spatial::Alloc || BO::spatial == spatial::Chunk ||
+          BO::spatial == spatial::ChunkD;
+
+      case spatial::Alloc:
+        return BO::spatial == spatial::Alloc;
     }
   }
 
@@ -98,7 +165,7 @@ namespace snmalloc
    * A pointer annotated with a "phantom type parameter" carrying a static
    * summary of its StrictProvenance metadata.
    */
-  template<typename T, capptr_bounds bounds>
+  template<typename T, SNMALLOC_CONCEPT(capptr_bounds::c) bounds>
   struct CapPtr
   {
     T* unsafe_capptr;
@@ -170,10 +237,13 @@ namespace snmalloc
     SNMALLOC_FAST_PATH T* operator->() const
     {
       /*
-       * CBAllocE bounds are associated with objects coming from or going to the
-       * client; we should be doing nothing with them.
+       * Alloc-bounded, platform-constrained pointers are associated with
+       * objects coming from or going to the client; we should be doing nothing
+       * with them.
        */
-      static_assert(bounds != CBAllocE);
+      static_assert(
+        (bounds::spatial != capptr_bounds::spatial::Alloc) ||
+        (bounds::platform != capptr_bounds::platform::Exported));
       return this->unsafe_capptr;
     }
   };
@@ -222,7 +292,7 @@ namespace snmalloc
    * annotations around an un-annotated std::atomic<T*>, to appease C++, yet
    * will expose or consume only CapPtr<T> with the same bounds annotation.
    */
-  template<typename T, capptr_bounds bounds>
+  template<typename T, SNMALLOC_CONCEPT(capptr_bounds::c) bounds>
   struct AtomicCapPtr
   {
     std::atomic<T*> unsafe_capptr;
