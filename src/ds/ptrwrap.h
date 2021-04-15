@@ -65,33 +65,60 @@ namespace snmalloc
       Exported,
       Internal
     };
+    enum class wild
+    {
+      /**
+       * The purported "pointer" here may just be a pile of bits.  On CHERI
+       * architectures, for example, it may not have a set tag or may be out of
+       * bounds.
+       */
+      Wild,
+      /**
+       * Either this pointer has provenance from the kernel or it has been
+       * checked by capptr_dewild.
+       */
+      Tame
+    };
 
-    template<spatial S, platform P>
+    template<spatial S, platform P, wild W>
     struct t
     {
       static constexpr enum spatial spatial = S;
       static constexpr enum platform platform = P;
+      static constexpr enum wild wild = W;
 
       template<enum spatial SO>
-      using with_spatial = t<SO, P>;
+      using with_spatial = t<SO, P, W>;
 
       template<enum platform PO>
-      using with_platform = t<S, PO>;
+      using with_platform = t<S, PO, W>;
+
+      template<enum wild WO>
+      using with_wild = t<S, P, WO>;
 
       /*
        * The dimensions here are not used completely orthogonally.  In
        * particular, high-authority spatial bounds imply high-authority in other
        * dimensions and unchecked pointers must be annotated as tightly bounded.
        */
-      static_assert(!(S == spatial::Arena) || (P == platform::Internal));
+      static_assert(
+        !(S == spatial::Arena) || (P == platform::Internal && W == wild::Tame));
+      static_assert(
+        !(W == wild::Wild) || (S == spatial::Alloc && P == platform::Exported));
     };
 
-    using CBArena = t<spatial::Arena, platform::Internal>;
-    using CBChunk = t<spatial::Chunk, platform::Internal>;
-    using CBChunkD = t<spatial::ChunkD, platform::Internal>;
-    using CBChunkE = t<spatial::Chunk, platform::Exported>;
-    using CBAlloc = t<spatial::Alloc, platform::Internal>;
-    using CBAllocE = t<spatial::Alloc, platform::Exported>;
+    /*
+     * Several combinations are used often enough that we give convenient
+     * aliases for them.
+     */
+
+    using CBArena = t<spatial::Arena, platform::Internal, wild::Tame>;
+    using CBChunk = t<spatial::Chunk, platform::Internal, wild::Tame>;
+    using CBChunkD = t<spatial::ChunkD, platform::Internal, wild::Tame>;
+    using CBChunkE = t<spatial::Chunk, platform::Exported, wild::Tame>;
+    using CBAlloc = t<spatial::Alloc, platform::Internal, wild::Tame>;
+    using CBAllocE = t<spatial::Alloc, platform::Exported, wild::Tame>;
+    using CBAllocEW = t<spatial::Alloc, platform::Exported, wild::Wild>;
 
     // clang-format off
 #ifdef __cpp_concepts
@@ -104,7 +131,8 @@ namespace snmalloc
     template<typename T>
     concept c =
       ConceptSame<decltype(T::spatial), const spatial> &&
-      ConceptSame<decltype(T::platform), const platform>;
+      ConceptSame<decltype(T::platform), const platform> &&
+      ConceptSame<decltype(T::wild), const wild>;
 #endif
     // clang-format on
   };
@@ -120,6 +148,7 @@ namespace snmalloc
   using CBChunkE = capptr_bounds::CBChunkE;
   using CBAlloc = capptr_bounds::CBAlloc;
   using CBAllocE = capptr_bounds::CBAllocE;
+  using CBAllocEW = capptr_bounds::CBAllocEW;
 
   /**
    * Compute the "exported" variant of a capptr_bounds annotation.  This is
@@ -140,6 +169,9 @@ namespace snmalloc
   SNMALLOC_CONSTEVAL bool capptr_is_spatial_refinement()
   {
     if (BI::platform != BO::platform)
+      return false;
+
+    if (BI::wild != BO::wild)
       return false;
 
     switch (BI::spatial)
@@ -281,6 +313,14 @@ namespace snmalloc
   SNMALLOC_FAST_PATH void* capptr_reveal(CapPtr<void, CBAllocE> p)
   {
     return p.unsafe_capptr;
+  }
+
+  /**
+   * Dually, given a void* from the client, it's fine to call it CBAllocEW.
+   */
+  SNMALLOC_FAST_PATH CapPtr<void, CBAllocEW> capptr_from_client(void* p)
+  {
+    return CapPtr<void, CBAllocEW>(p);
   }
 
   /**
