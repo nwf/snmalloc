@@ -79,22 +79,40 @@ namespace snmalloc
        */
       Tame
     };
+    enum class zero
+    {
+      /**
+       * The memory ranged over by this CapPtr<> has been zeroed, with the
+       * possible exception of a statically-known, allocator-controlled
+       * structure at the CapPtr<>'s address.
+       */
+      Zero,
+      /**
+       * The memory ranged over by this CapPtr<> is holding arbitrary data, or,
+       * at least, is not statically known to be zeroed.
+       */
+      Data
+    };
 
-    template<spatial S, platform P, wild W>
+    template<spatial S, platform P, wild W, zero Z>
     struct t
     {
       static constexpr enum spatial spatial = S;
       static constexpr enum platform platform = P;
       static constexpr enum wild wild = W;
+      static constexpr enum zero zero = Z;
 
       template<enum spatial SO>
-      using with_spatial = t<SO, P, W>;
+      using with_spatial = t<SO, P, W, Z>;
 
       template<enum platform PO>
-      using with_platform = t<S, PO, W>;
+      using with_platform = t<S, PO, W, Z>;
 
       template<enum wild WO>
-      using with_wild = t<S, P, WO>;
+      using with_wild = t<S, P, WO, Z>;
+
+      template<enum zero ZO>
+      using with_zero = t<S, P, W, ZO>;
 
       /*
        * The dimensions here are not used completely orthogonally.  In
@@ -112,13 +130,20 @@ namespace snmalloc
      * aliases for them.
      */
 
-    using CBArena = t<spatial::Arena, platform::Internal, wild::Tame>;
-    using CBChunk = t<spatial::Chunk, platform::Internal, wild::Tame>;
-    using CBChunkD = t<spatial::ChunkD, platform::Internal, wild::Tame>;
-    using CBChunkE = t<spatial::Chunk, platform::Exported, wild::Tame>;
-    using CBAlloc = t<spatial::Alloc, platform::Internal, wild::Tame>;
-    using CBAllocE = t<spatial::Alloc, platform::Exported, wild::Tame>;
-    using CBAllocEW = t<spatial::Alloc, platform::Exported, wild::Wild>;
+    using CBArena =
+      t<spatial::Arena, platform::Internal, wild::Tame, zero::Data>;
+    using CBChunk =
+      t<spatial::Chunk, platform::Internal, wild::Tame, zero::Data>;
+    using CBChunkD =
+      t<spatial::ChunkD, platform::Internal, wild::Tame, zero::Data>;
+    using CBChunkE =
+      t<spatial::Chunk, platform::Exported, wild::Tame, zero::Data>;
+    using CBAlloc =
+      t<spatial::Alloc, platform::Internal, wild::Tame, zero::Data>;
+    using CBAllocE =
+      t<spatial::Alloc, platform::Exported, wild::Tame, zero::Data>;
+    using CBAllocEW =
+      t<spatial::Alloc, platform::Exported, wild::Wild, zero::Data>;
 
     // clang-format off
 #ifdef __cpp_concepts
@@ -132,7 +157,8 @@ namespace snmalloc
     concept c =
       ConceptSame<decltype(T::spatial), const spatial> &&
       ConceptSame<decltype(T::platform), const platform> &&
-      ConceptSame<decltype(T::wild), const wild>;
+      ConceptSame<decltype(T::wild), const wild> &&
+      ConceptSame<decltype(T::zero), const zero>;
 #endif
     // clang-format on
   };
