@@ -7,6 +7,7 @@
  */
 
 #include "../backend/backend_concept.h"
+#include "../backend/metatypes.h"
 #include "../ds/mpmcstack.h"
 #include "../ds/spmcstack.h"
 #include "../mem/metaslab.h"
@@ -32,18 +33,15 @@ namespace snmalloc
   static_assert(std::is_standard_layout_v<ChunkRecord>);
   static_assert(
     offsetof(ChunkRecord, meta_common) == 0,
-    "ChunkRecord and Metaslab must share a common prefix");
+    "ChunkRecord* must be pointer convertible to MetaCommon*");
+  static_assert(
+    sizeof(ChunkRecord) <= PAGEMAP_METADATA_STRUCT_SIZE,
+    "Chunkrecord must fit in the pagemap metadata record");
 
   /**
    * How many slab sizes that can be provided.
    */
   constexpr size_t NUM_SLAB_SIZES = Pal::address_bits - MIN_CHUNK_BITS;
-
-  /**
-   * Used to ensure the per slab meta data is large enough for both use cases.
-   */
-  static_assert(
-    sizeof(Metaslab) >= sizeof(ChunkRecord), "We conflate these two types.");
 
   /**
    * Number of free stacks per chunk size that each allocator will use.
@@ -256,7 +254,7 @@ namespace snmalloc
 #endif
 
       state.add_peak_memory_usage(slab_size);
-      state.add_peak_memory_usage(sizeof(Metaslab));
+      state.add_peak_memory_usage(PAGEMAP_METADATA_STRUCT_SIZE);
       // TODO handle bounded versus lazy pagemaps in stats
       state.add_peak_memory_usage(
         (slab_size / MIN_CHUNK_SIZE) * sizeof(MetaEntry));
