@@ -10,7 +10,7 @@ namespace snmalloc
    * Makes the supplied ParentRange into a global variable,
    * and protects access with a lock.
    */
-  template<typename ParentRange>
+  template<SNMALLOC_CONCEPT(ConceptBackendRange) ParentRange>
   class GlobalRange
   {
     typename ParentRange::State parent{};
