@@ -250,11 +250,8 @@ namespace snmalloc
      *   (remote, sizeclass, metaslab)
      * where metaslab, is the second element of the pair return.
      */
-    static std::pair<capptr::Chunk<void>, Metaslab*> alloc_chunk(
-      LocalState& local_state,
-      size_t size,
-      RemoteAllocator* remote,
-      sizeclass_t sizeclass)
+    static std::pair<capptr::Chunk<void>, Metaslab*>
+    alloc_chunk(LocalState& local_state, size_t size, MetaEntry::RAS ras)
     {
       SNMALLOC_ASSERT(bits::is_pow2(size));
       SNMALLOC_ASSERT(size >= MIN_CHUNK_SIZE);
@@ -289,7 +286,7 @@ namespace snmalloc
 
       meta->meta_common.chunk = p;
 
-      MetaEntry t(meta, remote, sizeclass);
+      MetaEntry t(&meta->meta_common, ras);
       Pagemap::set_metaentry(address_cast(p), size, t);
 
       p = Aal::capptr_bound<void, capptr::bounds::Chunk>(p, size);

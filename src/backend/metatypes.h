@@ -53,10 +53,6 @@ namespace snmalloc
 #endif
     ;
 
-  struct RemoteAllocator;
-  class Metaslab;
-  class sizeclass_t;
-
   /**
    * Entry stored in the pagemap.  See docs/AddressSpace.md for the full
    * MetaEntry lifecycle.
@@ -86,12 +82,38 @@ namespace snmalloc
      */
     static constexpr address_t META_BOUNDARY_BIT = 1 << 0;
 
+  public:
+    /**
+     * As far as the backend is concerned, the remote_and_sizeclass field below
+     * is mostly just a uintptr_t (but see REMOTE_BACKEND_MARKER).  In the
+     * frontend, however, it is a packed bitfield within a pointer to a
+     * RemoteAllocator.  Since we'd rather not have the details of that packing
+     * here in the backend, define a class that the frontend can use as a base
+     * class for such details.  See src/mem/metaslab.h:/MetaslabRAS
+     */
+    class RAS
+    {
+      friend MetaEntry;
+
+    protected:
+      uintptr_t word;
+
+      constexpr RAS(uintptr_t w) : word(w){};
+
+    public:
+      static constexpr RAS unsafe_from(uintptr_t w)
+      {
+        return RAS(w);
+      }
+    };
+
+  protected:
     /**
      * In common cases, a bit-packed pointer to the owning allocator (if any),
-     * and the sizeclass of this chunk.  See mem/metaslab.h:MetaEntryRemote for
+     * and the sizeclass of this chunk.  See mem/metaslab.h:MetaslabRAS for
      * details of this case and docs/AddressSpace.md for further details.
      */
-    uintptr_t remote_and_sizeclass{0};
+    RAS remote_and_sizeclass{0};
 
   public:
     /**
@@ -114,25 +136,10 @@ namespace snmalloc
      * `get_remote_and_sizeclass`.
      */
     SNMALLOC_FAST_PATH
-    MetaEntry(Metaslab* meta, uintptr_t remote_and_sizeclass)
+    MetaEntry(MetaCommon* meta, RAS remote_and_sizeclass)
     : meta(reinterpret_cast<uintptr_t>(meta)),
       remote_and_sizeclass(remote_and_sizeclass)
     {}
-
-    /* See mem/metaslab.h */
-    SNMALLOC_FAST_PATH
-    MetaEntry(Metaslab* meta, RemoteAllocator* remote, sizeclass_t sizeclass);
-
-    /**
-     * Return the Metaslab metadata associated with this chunk, guarded by an
-     * assert that this chunk is being used as a slab (i.e., has an associated
-     * owning allocator).
-     */
-    [[nodiscard]] SNMALLOC_FAST_PATH Metaslab* get_metaslab() const
-    {
-      SNMALLOC_ASSERT(get_remote() != nullptr);
-      return reinterpret_cast<Metaslab*>(meta & ~META_BOUNDARY_BIT);
-    }
 
     /**
      * Return the remote and sizeclass in an implementation-defined encoding.
@@ -140,14 +147,10 @@ namespace snmalloc
      * only safe use for this is to pass it to the two-argument constructor of
      * this class.
      */
-    [[nodiscard]] SNMALLOC_FAST_PATH uintptr_t get_remote_and_sizeclass() const
+    [[nodiscard]] SNMALLOC_FAST_PATH const RAS& get_ras() const
     {
       return remote_and_sizeclass;
     }
-
-    /* See mem/metaslab.h */
-    [[nodiscard]] SNMALLOC_FAST_PATH RemoteAllocator* get_remote() const;
-    [[nodiscard]] SNMALLOC_FAST_PATH sizeclass_t get_sizeclass() const;
 
     MetaEntry(const MetaEntry&) = delete;
 
@@ -158,6 +161,16 @@ namespace snmalloc
         address_cast(meta & META_BOUNDARY_BIT);
       remote_and_sizeclass = other.remote_and_sizeclass;
       return *this;
+    }
+
+    /**
+     * Return the Metaslab metadata associated with this chunk, guarded by an
+     * assert that this chunk is being used as a slab (i.e., has an associated
+     * owning allocator).
+     */
+    [[nodiscard]] SNMALLOC_FAST_PATH MetaCommon* get_meta() const
+    {
+      return reinterpret_cast<MetaCommon*>(meta & ~META_BOUNDARY_BIT);
     }
 
     void set_boundary()
@@ -175,5 +188,14 @@ namespace snmalloc
       return meta &= ~META_BOUNDARY_BIT;
     }
   };
+
+  /**
+   * A RAS value that minimally flags this chunk as being owned by the backend.
+   *
+   * We, sadly, can't name this MetaEntry::REMOTE_BACKEND because the nested RAS
+   * class isn't complete until the MetaEntry class itself is complete.
+   */
+  constexpr MetaEntry::RAS RAS_BACKEND =
+    MetaEntry::RAS::unsafe_from(MetaEntry::REMOTE_BACKEND_MARKER);
 
 } // namespace snmalloc

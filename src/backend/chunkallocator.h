@@ -187,10 +187,9 @@ namespace snmalloc
     static std::pair<capptr::Chunk<void>, Metaslab*> alloc_chunk(
       typename SharedStateHandle::LocalState& local_state,
       ChunkAllocatorLocalState& chunk_alloc_local_state,
-      sizeclass_t sizeclass,
       chunksizeclass_t slab_sizeclass,
       size_t slab_size,
-      RemoteAllocator* remote)
+      MetaEntry::RAS ras)
     {
       using PAL = typename SharedStateHandle::Pal;
       ChunkAllocatorState& state =
@@ -238,7 +237,7 @@ namespace snmalloc
                   << " memory in stacks " << state.memory_in_stacks
                   << std::endl;
 #endif
-        MetaEntry entry{meta, remote, sizeclass};
+        MetaEntry entry{&meta->meta_common, ras};
         SharedStateHandle::Pagemap::set_metaentry(
           address_cast(slab), slab_size, entry);
         return {slab, meta};
@@ -246,8 +245,8 @@ namespace snmalloc
 
       // Allocate a fresh slab as there are no available ones.
       // First create meta-data
-      auto [slab, meta] = SharedStateHandle::alloc_chunk(
-        &local_state, slab_size, remote, sizeclass);
+      auto [slab, meta] =
+        SharedStateHandle::alloc_chunk(&local_state, slab_size, ras);
 #ifdef SNMALLOC_TRACING
       std::cout << "Create slab:" << slab.unsafe_ptr() << " slab_sizeclass "
                 << slab_sizeclass << " size " << slab_size << std::endl;
